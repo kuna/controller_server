@@ -25,7 +25,7 @@ class RecvServer(StreamRequestHandler):
 			if not r:
 				pass
 			else:
-				conn.send( r.encode('utf-8') )
+				print( "-> %s"%r )
 
 class ConnServer(Thread):
 	def __init__(self):
@@ -123,7 +123,7 @@ class GameServer(Thread):
 				if not r:
 					pass
 				else:
-					conn.send(r)
+					print( "-> %s" % r )
 
 	def sendEncode(self, data):
 		if not self.sc:

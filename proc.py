@@ -1,15 +1,23 @@
+import random
+
 GAME_NONE = 0
 GAME_ROOM = 1
 GAME_PLAY = 2
 GAME_RESULT = 3
+
+GAME_SELECT = 10
 
 class ConnProc:
 	def __init__(self):
 		self.roomcnt = 0
 		self.conncnt = 0
 		self.connid = []
-		self.connlist = {}
 		self.state = GAME_NONE
+
+		# ############# #
+		# for character #
+		# ############# #
+		self.charsel = []
 	
 	def SetServerConn(self, conn):
 		self.sc = conn
@@ -19,7 +27,7 @@ class ConnProc:
 
 	def ProcCommand(self, msg, conn):
 		data = msg.split("\n")
-		for x in data
+		for x in data:
 			self._ProcCommand(x.strip(), conn)
 
 	def _ProcCommand(self, msg, conn):
@@ -34,18 +42,33 @@ class ConnProc:
 			self.conncnt = 0
 			self.roomcnt = 0
 			self.connid = []
-			self.connlist = {}
 			self.state = GAME_NONE
-			return "OK CONN"
 
-		if (args[0] == "ROOM"):
+			self.charsel = []
+			
+			self.sc.sendEncode("OK CONN\n")
+
+		if (args[0] == "ROOM"):			
 			self.roomcnt = int(args[1])
+                        retstr = "ROOM %d" % self.roomcnt
+
 			print "room max: %d" % self.roomcnt
+
 			self.state = GAME_ROOM
 			for i in range(self.roomcnt):
-				self.connid.append( [args[i+2], None] )
-				print "room: %s" % args[i+2]
+	                        # create room code
+        	                _rn = random.randint(0, 9999)
+                	        _rstr = "%04d"%_rn
+				self.connid.append( [_rstr, None] )
+				self.charsel.append( 0 )
+				print "room: %s" % _rstr
 
+				retstr = "%s %s" % (retstr, _rstr)
+
+			# return random created codes
+			retstr = "%s\n" % retstr
+			self.sc.sendEncode(retstr)
+			
 
 		# ############## #
 		# Client Side ## #
@@ -54,6 +77,7 @@ class ConnProc:
 		#client(conn) part
 		if (args[0] == "JOIN"):
 			if (self.state != GAME_ROOM):
+				conn.send( self.Encode("ERROR\n"))
 				return "ERROR"
 
 			# search for valid device code
@@ -67,49 +91,114 @@ class ConnProc:
 
 			if not isConnfound:
 				print "Invalid connection id: %s" % args[1], self.connid[0][0]
-				return "ERROR JOIN"
+				conn.send( self.Encode( "ERROR JOIN\n"))
 			
 			self.conncnt += 1
 			if (self.conncnt == self.roomcnt):
-				self.sc.sendEncode( "OK JOIN ALL" )
+				self.sc.sendEncode( "OK JOIN ALL\n" )
 				for i in range(self.roomcnt):
-					self.connid[i][1].send(self.Encode("OK JOIN ALL"))
+					self.connid[i][1].send(self.Encode("OK JOIN ALL\n"))
+					self.connid[i][1].send(self.Encode("MODIFY ALL gogun ui\n"))
+		
+				# ################# #
+				# go to select mode #
+				# ################# #
+				
+				self.state = GAME_SELECT
+				for i in range(self.roomcnt):
+					self.connid[i][1].send(self.Encode("MODIFY ALL Flag select\n"))
+
 			else:
-				self.sc.sendEncode( "OK JOIN %s" % args[1] )
+				self.sc.sendEncode( "OK JOIN %s\n" % args[1] )
+				conn.send( self.Encode( "OK JOIN %s\n"%args[1] ))
 				return "OK JOIN %s" % args[1]
 			
 
+		if (args[0] == "REPLAY"):
+			# call STARTGAME
+			self.sc.sendEncode("REPLAY\n")
+			args[0] = "STARTGAME"
+
 		if (args[0] == "STARTGAME"):
 			self.state = GAME_PLAY
-			
+			for i in range(self.roomcnt):
+				self.connid[i][1].send(self.Encode("MODIFY ALL Flag game\n"))
 
+		if (args[0] == "RESULT"):	# RESULT (id) (score) (win?0:1)
+			for i in range(self.roomcnt):
+				if (self.connid[i][0] == args[1]):
+                                        # 0. record score of user (not implemented)
+
+					# 1. change screen to User
+					if (int(args[3])==1):
+						self.connid[i][1].send( self.Encode( "MODIFY ALL Flag win\n"))
+					else:
+                                                self.connid[i][1].send( self.Encode( "MODIFY ALL Flag win\n"))
+
+					# 2. change id to score
+					#self.connid[i][1].send(self.Encode("EDIT ALL 1 text %d\n"%1234))	# score
 
 		if (args[0] == "PING"):
-			return "PONG %s"%args[1]
+			conn.send(self.Encode("PONG %s\n"%args[1]))
 
 		if (args[0] == "QUIT"):
 			# check is logined
 			for i in range(self.roomcnt):
-				self.connid[i][1].send( self.Encode("QUIT") )
+				self.connid[i][1].send( self.Encode("QUIT\n") )
 				self.connid[i][1].close()
-			self.sc.sendEncode("QUIT")
+			self.sc.sendEncode("QUIT\n")
 			self.sc.release()
+
+			# re-alive to connect another game
+			self.sc.initSock()
 			return "QUIT BY SERVER"
 			
 		if (args[0] == "MODIFY"):
 			if (self.state != GAME_PLAY):
-				return "ERROR"
+				conn.send( self.Encode("ERROR\n"))
 
 			for i in range(self.roomcnt):
 				if (args[1] == "ALL"):
-					self.connid[i][1].send( self.Encode(msg) )
+					self.connid[i][1].send( self.Encode("%s\n"%msg) )
 					continue
 
 				if (self.connid[i][0] == args[1]):
 					# send data after modification
 					#data = msg.replace("EVENT", "MODIFY", 1)
-					self.connid[i][1].send( self.Encode(msg) )
+					self.connid[i][1].send( self.Encode("%s\n"%msg) )
 					break
 
 		if (args[0] == "EVENT"):
-			self.sc.sendEncode(msg)
+			# ############################### #
+			# special route for character sel #
+			# ############################### #
+			if (self.state == GAME_SELECT and (int(args[2])==300 or int(args[2])==301)):
+				# select character
+				if (int(args[3])>1000 and int(args[3])<1010):
+					for i in range(self.roomcnt):
+						if (self.connid[i][0]==args[1] and self.charsel[i]<10):
+							self.charsel[i] = int(arg[3])%1000
+							self.sc.sendEncode("OK CHARACTER %s %d\n"%(args[1], self.charsel[i]))
+							break
+		
+				# choose character
+				if (int(args[3])>=1010):
+					for i in range(self.roomcnt):
+						if (self.connid[i][0]==args[1] and self.charsel[i]>0):
+							self.charsel[i] += 10
+                                                        self.sc.sendEncode("OK CHARACTER %s %s\n"%(args[1], self.charsel[i]))
+							break
+
+				# if all character is choosed
+				charsel = True
+				for i in range(self.roomcnt):
+					if (self.charsel[i]<10):
+						charsel = False
+				if(charsel):
+					self.sc.sendEncode("OK CHARACTER ALL\n")
+					for i in range(self.roomcnt):
+						self.connid[i][1].send(self.Encode("OK CHARACTER ALL\n")
+                                                #self.connid[i][1].send(self.Encode("MODIFY ALL Flag game\n")
+					
+
+			self.sc.sendEncode("%s\n"%msg)
