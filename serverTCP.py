@@ -3,6 +3,7 @@ from SocketServer import ThreadingTCPServer, StreamRequestHandler
 from threading import Thread
 
 from proc import ConnProc
+import time
 
 class RecvServer(StreamRequestHandler):
 	def handle(self):
@@ -80,8 +81,17 @@ class GameServer(Thread):
 		self.init = False
 
 	def run(self):
-		if (self.initSock()):
-			self.recv()
+		while (True):
+			try:
+				if (self.initSock()):
+					self.recv()
+			except Exception, e:
+				print e
+				print 'recreate server socket after 5 sec...'
+				time.sleep(5)
+				continue
+			print 'recreate server socket after 5 sec...'
+			time.sleep(5)
 
 	def initSock(self):
 		try:
@@ -98,7 +108,8 @@ class GameServer(Thread):
 		self.init = True
 		return True
 	def recv(self):
-		while True:
+		
+		while self.init:
 			conn, addr = self.server.accept()
 			self.sc = conn
 			print '[Game] conncection from', addr
@@ -108,10 +119,12 @@ class GameServer(Thread):
 				if not data:
 					conn.close()
 					print 'connection disconnected'
+					self.init = False
 					break
 				if (data == 'CLOSE'):
 					conn.close()
 					print 'game closed'
+					self.init = False
 					break
 		
 				print 'recv cmd: %s' % data

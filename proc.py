@@ -77,8 +77,8 @@ class ConnProc:
 		#client(conn) part
 		if (args[0] == "JOIN"):
 			if (self.state != GAME_ROOM):
-				conn.send( self.Encode("ERROR\n"))
-				return "ERROR"
+				conn.send( self.Encode("ERROR NOROOM\n"))
+				return "ERROR JOIN - no room"
 
 			# search for valid device code
 			isConnfound = False
@@ -91,8 +91,12 @@ class ConnProc:
 
 			if not isConnfound:
 				print "Invalid connection id: %s" % args[1], self.connid[0][0]
-				conn.send( self.Encode( "ERROR JOIN\n"))
-			
+				conn.send( self.Encode( "ERROR JOINCODE\n"))
+				return "ERROR JOINCODE"
+
+                        self.sc.sendEncode( "OK JOIN %s\n" % args[1] )
+                        conn.send( self.Encode( "OK JOIN %s\n"%args[1] ))
+
 			self.conncnt += 1
 			if (self.conncnt == self.roomcnt):
 				self.sc.sendEncode( "OK JOIN ALL\n" )
@@ -107,22 +111,14 @@ class ConnProc:
 				self.state = GAME_SELECT
 				for i in range(self.roomcnt):
 					self.connid[i][1].send(self.Encode("MODIFY ALL Flag select\n"))
+				return "OK JOIN ALL"
 
-			else:
-				self.sc.sendEncode( "OK JOIN %s\n" % args[1] )
-				conn.send( self.Encode( "OK JOIN %s\n"%args[1] ))
-				return "OK JOIN %s" % args[1]
+
+			return "OK JOIN %s" % args[1]
 			
 
-		if (args[0] == "REPLAY"):
-			# call STARTGAME
-			self.sc.sendEncode("REPLAY\n")
-			args[0] = "STARTGAME"
-
-		if (args[0] == "STARTGAME"):
-			self.state = GAME_PLAY
-			for i in range(self.roomcnt):
-				self.connid[i][1].send(self.Encode("MODIFY ALL Flag game\n"))
+		if (args[0] == "ENDGAME"):
+			self.state = GAME_RESULT
 
 		if (args[0] == "RESULT"):	# RESULT (id) (score) (win?0:1)
 			for i in range(self.roomcnt):
@@ -136,23 +132,11 @@ class ConnProc:
                                                 self.connid[i][1].send( self.Encode( "MODIFY ALL Flag win\n"))
 
 					# 2. change id to score
-					#self.connid[i][1].send(self.Encode("EDIT ALL 1 text %d\n"%1234))	# score
+					self.connid[i][1].send(self.Encode("EDIT ALL 1 text %d\n"%1234))	# score
 
 		if (args[0] == "PING"):
 			conn.send(self.Encode("PONG %s\n"%args[1]))
 
-		if (args[0] == "QUIT"):
-			# check is logined
-			for i in range(self.roomcnt):
-				self.connid[i][1].send( self.Encode("QUIT\n") )
-				self.connid[i][1].close()
-			self.sc.sendEncode("QUIT\n")
-			self.sc.release()
-
-			# re-alive to connect another game
-			self.sc.initSock()
-			return "QUIT BY SERVER"
-			
 		if (args[0] == "MODIFY"):
 			if (self.state != GAME_PLAY):
 				conn.send( self.Encode("ERROR\n"))
@@ -172,12 +156,12 @@ class ConnProc:
 			# ############################### #
 			# special route for character sel #
 			# ############################### #
-			if (self.state == GAME_SELECT and (int(args[2])==300 or int(args[2])==301)):
+			if (self.state == GAME_SELECT and int(args[2])==301 ):
 				# select character
 				if (int(args[3])>1000 and int(args[3])<1010):
 					for i in range(self.roomcnt):
 						if (self.connid[i][0]==args[1] and self.charsel[i]<10):
-							self.charsel[i] = int(arg[3])%1000
+							self.charsel[i] = int(args[3])%1000
 							self.sc.sendEncode("OK CHARACTER %s %d\n"%(args[1], self.charsel[i]))
 							break
 		
@@ -197,8 +181,64 @@ class ConnProc:
 				if(charsel):
 					self.sc.sendEncode("OK CHARACTER ALL\n")
 					for i in range(self.roomcnt):
-						self.connid[i][1].send(self.Encode("OK CHARACTER ALL\n")
-                                                #self.connid[i][1].send(self.Encode("MODIFY ALL Flag game\n")
-					
+						self.connid[i][1].send(self.Encode("OK CHARACTER ALL\n"))
+                                                #self.connid[i][1].send(self.Encode("MODIFY ALL Flag game\n"))
+
+
+			# ############################## #
+			# special route for motion recog #
+			# ############################## #
+			
+			if (int(args[2])==200):
+				vals = args[3].split(",")
+				print vals	#temp - for debugging
+				acclX = float(vals[0])
+				acclY = float(vals[1])
+				acclZ = float (vals[2])
+				if (acclY > 5 and acclZ > 9.8+2):
+					self.sc.sendEncode("EVENT %s 400\n"%args[1])	# up: acclY < 10 and acclZ < 9.8-2
+				if (acclY < -5 and acclZ < 9.8-2):
+					self.sc.sendEncode("EVENT %s 401\n"%args[1])	# down: acclY > 10 and acclZ > 9.8+2
+
+			# ############################# #
+			# special route for game replay #
+			# ############################# #
+			if (self.state == GAME_RESULT and int(args[2]) == 301):
+				if (int(args[3]) == 1010): # quit button	
+		                        for i in range(self.roomcnt):
+                		                self.connid[i][1].send( self.Encode("QUIT\n") )
+		                        self.sc.sendEncode("QUIT\n")
+				if (int(args[3]) == 1011): # replay button
+					# call replay
+					args[0] = "REPLAY"			
+
 
 			self.sc.sendEncode("%s\n"%msg)
+
+
+                if (args[0] == "REPLAY"):
+                        # call STARTGAME
+                        self.sc.sendEncode("REPLAY\n")
+                        args[0] = "STARTGAME"
+
+                if (args[0] == "STARTGAME"):
+                        self.state = GAME_PLAY
+                        for i in range(self.roomcnt):
+                                self.connid[i][1].send(self.Encode("MODIFY ALL Flag game\n"))
+
+
+                if (args[0] == "QUIT"):
+                        # check is logined
+                        for i in range(self.roomcnt):
+				if (self.connid[i][1] != None):
+                                	self.connid[i][1].send( self.Encode("QUIT\n") )
+                                	#self.connid[i][1].close()
+                        self.sc.sendEncode("QUIT\n")
+                        #self.sc.release()
+
+                        # re-alive to connect another game
+                        #self.sc.initSock()
+                        return "QUIT BY SERVER"
+
+
+
