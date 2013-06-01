@@ -16,7 +16,7 @@ class RecvServer(StreamRequestHandler):
 				conn.close()
 				print self.client_address, 'disconnected'
 				break
-			print self.client_address, msg
+			#print self.client_address, msg
 
 			if (msg == 'CONNCON'):
 				g_connlist.append(conn)

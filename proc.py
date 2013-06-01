@@ -28,7 +28,11 @@ class ConnProc:
 	def ProcCommand(self, msg, conn):
 		data = msg.split("\n")
 		for x in data:
-			self._ProcCommand(x.strip(), conn)
+			try:
+				self._ProcCommand(x.strip(), conn)
+			except Exception, e:
+				print e
+				print "[ERROR MSG] %s"%x
 
 	def _ProcCommand(self, msg, conn):
 		args = msg.split(" ")
@@ -132,7 +136,7 @@ class ConnProc:
                                                 self.connid[i][1].send( self.Encode( "MODIFY ALL Flag win\n"))
 
 					# 2. change id to score
-					self.connid[i][1].send(self.Encode("EDIT ALL 1 text %d\n"%1234))	# score
+					self.connid[i][1].send(self.Encode("EDIT ALL 100 button text %d\n"%1234))	# score
 
 		if (args[0] == "PING"):
 			conn.send(self.Encode("PONG %s\n"%args[1]))
@@ -188,17 +192,22 @@ class ConnProc:
 			# ############################## #
 			# special route for motion recog #
 			# ############################## #
-			
-			if (int(args[2])==200):
+		
+			if (len(args) < 3):
+				return			
+
+			if (int(args[2])==201):
 				vals = args[3].split(",")
-				print vals	#temp - for debugging
-				acclX = float(vals[0])
-				acclY = float(vals[1])
-				acclZ = float (vals[2])
-				if (acclY > 5 and acclZ > 9.8+2):
+				mAngleX = float(vals[0])
+				mAngleY = float(vals[1])
+				mAngleZ = float(vals[2])
+				if (mAngleY < -30):
 					self.sc.sendEncode("EVENT %s 400\n"%args[1])	# up: acclY < 10 and acclZ < 9.8-2
-				if (acclY < -5 and acclZ < 9.8-2):
+				if (mAngleY > 30):
 					self.sc.sendEncode("EVENT %s 401\n"%args[1])	# down: acclY > 10 and acclZ > 9.8+2
+
+			if (int(args[2])==200 or int(args[2])==201):
+				return
 
 			# ############################# #
 			# special route for game replay #
