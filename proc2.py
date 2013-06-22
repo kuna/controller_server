@@ -44,6 +44,7 @@ class ConnProc:
 		return "TCP"
 
 	def ProcCommand(self, msg, conn, ptype):
+		msg = msg.replace("\r", "\n")
 		data = msg.split("\n")
 		
 		for x in data:
@@ -74,20 +75,20 @@ class ConnProc:
 			
 			self.sc.sendEncode("OK CONN\n")
 
-		if (args[0] == "ROOM"):			
-			self.roomcnt = int(args[1])
-                        retstr = "ROOM %d" % self.roomcnt
+		if (args[0] == "ROOM"):
+			self.roomcnt = self.roomcnt + int(args[1])	# support ROOM extend
+                        retstr = "ROOM %d" % int(args[1])
 
 			print "room max: %d" % self.roomcnt
 
 			self.state = GAME_ROOM
-			for i in range(self.roomcnt):
+			for i in range( int(args[1])  ):
 	                        # create room code
         	                _rn = random.randint(0, 9999)
                 	        _rstr = "%04d"%_rn
 				self.connid.append( [_rstr, None] )
 				self.charsel.append( 0 )
-				self.conntype.append( "TCP" )
+				self.conntype.append( 0 )
 				print "room: %s" % _rstr
 
 				retstr = "%s %s" % (retstr, _rstr)
@@ -110,7 +111,10 @@ class ConnProc:
 			# search for valid device code
 			isConnfound = False
 			for i in range(self.roomcnt):
-				if self.connid[i][0]==args[1]:
+				if self.connid[i][0]==args[1]:	# cannot connect to already connected code
+					if self.conntype[i]!=0:
+						conn.send( self.Encode( "ERROR JOINCODE\n", ptype) )
+						return "ERROR JOINCODE(duplicate)"
 					self.connid[i][1] = conn
 					self.conntype[i] = ptype
 					isConnfound = True
@@ -130,15 +134,14 @@ class ConnProc:
 				self.sc.sendEncode( "OK JOIN ALL\n" )
 				for i in range(self.roomcnt):
 					self.connid[i][1].send(self.Encode("OK JOIN ALL\n", ptype))
-					#self.connid[i][1].send(self.Encode("MODIFY ALL gogun ui\n"))
 		
 				# ################# #
 				# go to select mode #
 				# ################# #
 				
 				self.state = GAME_SELECT
-				for i in range(self.roomcnt):
-					self.connid[i][1].send(self.Encode("MODIFY ALL Flag select\n", ptype))
+				#for i in range(self.roomcnt):
+				#	self.connid[i][1].send(self.Encode("MODIFY ALL Flag select\n", ptype))
 				return "OK JOIN ALL"
 
 
@@ -149,6 +152,7 @@ class ConnProc:
 			self.state = GAME_RESULT
 
 		if (args[0] == "RESULT"):	# RESULT (id) (score) (win?0:1)
+			print "RESULT!!", args
 			for i in range(self.roomcnt):
 				if (self.connid[i][0] == args[1]):
                                         # 0. record score of user (not implemented)
@@ -169,8 +173,8 @@ class ConnProc:
 			conn.send(self.Encode("PONG %s\n"%args[1], ptype))
 
 		if (args[0] == "MODIFY"):
-			if (self.state != GAME_PLAY):
-				conn.send( self.Encode("ERROR\n", ptype))
+			#if (self.state != GAME_PLAY):
+			#	conn.send( self.Encode("ERROR\n", ptype))
 
 			for i in range(self.roomcnt):
 				if (args[1] == "ALL"):
@@ -187,13 +191,14 @@ class ConnProc:
 			# ############################### #
 			# special route for character sel #
 			# ############################### #
-			if (self.state == GAME_SELECT and int(args[2])==301 ):
+			if (int(args[2])==301 ):
 				# select character
 				if (int(args[3])>1000 and int(args[3])<1010):
 					for i in range(self.roomcnt):
 						if (self.connid[i][0]==args[1] and self.charsel[i]<10):
 							self.charsel[i] = int(args[3])%1000
 							self.sc.sendEncode("OK CHARACTER %s %d\n"%(args[1], self.charsel[i]))
+							print "selected", (args[1], self.charsel[i])
 							break
 		
 				# choose character
@@ -209,7 +214,7 @@ class ConnProc:
 				for i in range(self.roomcnt):
 					if (self.charsel[i]<10):
 						charsel = False
-				if(charsel):
+				if(charsel and  self.state==GAME_SELECT):
 					self.sc.sendEncode("OK CHARACTER ALL\n")
 					for i in range(self.roomcnt):
 						self.connid[i][1].send(self.Encode("MODIFY ALL Flag game\n", self.conntype[i] ))
@@ -233,8 +238,8 @@ class ConnProc:
 				if (mAngleY > 30):
 					self.sc.sendEncode("EVENT %s 401\n"%args[1])	# down: acclY > 10 and acclZ > 9.8+2
 
-			if (int(args[2])==200 or int(args[2])==201):
-				return
+			#if (int(args[2])==200 or int(args[2])==201):
+			#	return
 
 			# ############################# #
 			# special route for game replay #
@@ -275,6 +280,11 @@ class ConnProc:
                         # re-alive to connect another game
                         #self.sc.initSock()
                         return "QUIT BY SERVER"
+
+		if (args[0] == "SENDDATA"):			
+                        for i in range(self.roomcnt):
+                                if (self.connid[i][1] != None):
+                                        self.connid[i][1].send( self.Encode("SENDDATA ALL\n", self.conntype[i]) )
 
 
 
